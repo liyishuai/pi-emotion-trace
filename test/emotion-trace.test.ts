@@ -5,8 +5,6 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import emotionTraceExtension from "../extensions/emotion-trace.ts";
 import {
 	buildClassificationPlan,
 	parseClassificationBatch,
@@ -16,12 +14,11 @@ import {
 	readSessionEntriesReadOnly,
 } from "../src/history.ts";
 import { renderEmotionTraceHtml } from "../src/report.ts";
-import {
-	VERIFIED_PROMPT_ENTRY_TYPE,
-	type EmotionTraceResult,
-	type EmotionTraceSettings,
-	type HistoricalPrompt,
-	type SessionSource,
+import type {
+	EmotionTraceResult,
+	EmotionTraceSettings,
+	HistoricalPrompt,
+	SessionSource,
 } from "../src/types.ts";
 
 const settings: EmotionTraceSettings = {
@@ -31,33 +28,6 @@ const settings: EmotionTraceSettings = {
 	classifierModel: "example/model",
 };
 
-test("records only direct interactive input as verified human prompts", () => {
-	let inputHandler:
-		| ((event: { type: "input"; text: string; source: string }) => unknown)
-		| undefined;
-	const appended: Array<{ customType: string; data: unknown }> = [];
-	const fakePi = {
-		on(eventType: string, handler: typeof inputHandler) {
-			if (eventType === "input") inputHandler = handler;
-		},
-		appendEntry(customType: string, data: unknown) {
-			appended.push({ customType, data });
-		},
-		registerCommand() {},
-	} as unknown as ExtensionAPI;
-	emotionTraceExtension(fakePi);
-	assert.ok(inputHandler);
-	inputHandler({ type: "input", text: "  human prompt  ", source: "interactive" });
-	inputHandler({ type: "input", text: "injected", source: "extension" });
-	inputHandler({ type: "input", text: "rpc input", source: "rpc" });
-	assert.deepEqual(appended, [
-		{
-			customType: VERIFIED_PROMPT_ENTRY_TYPE,
-			data: { version: 1, source: "interactive", text: "human prompt" },
-		},
-	]);
-});
-
 test("loads only chronological human prompts and keeps the newest limit", async () => {
 	const now = Date.now();
 	const source: SessionSource = {
@@ -66,23 +36,34 @@ test("loads only chronological human prompts and keeps the newest limit", async 
 		created: new Date(now - 10_000),
 		modified: new Date(now),
 	};
-	const verified = (id: string, text: string, timestamp: number) => ({
-		type: "custom",
-		customType: VERIFIED_PROMPT_ENTRY_TYPE,
-		id,
-		timestamp: new Date(timestamp).toISOString(),
-		data: { version: 1, source: "interactive", text },
-	});
 	const entries = [
-		verified("u1", "first prompt", now - 3_000),
 		{
 			type: "message",
-			id: "injected",
-			timestamp: new Date(now - 2_500).toISOString(),
-			message: { role: "user", content: "extension-injected text" },
+			id: "u1",
+			timestamp: new Date(now - 3_000).toISOString(),
+			message: { role: "user", content: "first prompt" },
 		},
-		verified("u2", "second prompt", now - 2_000),
-		verified("u3", "third prompt", now - 1_000),
+		{
+			type: "message",
+			id: "a1",
+			timestamp: new Date(now - 2_500).toISOString(),
+			message: { role: "assistant", content: "assistant prose" },
+		},
+		{
+			type: "message",
+			id: "u2",
+			timestamp: new Date(now - 2_000).toISOString(),
+			message: {
+				role: "user",
+				content: [{ type: "text", text: "second prompt" }],
+			},
+		},
+		{
+			type: "message",
+			id: "u3",
+			timestamp: new Date(now - 1_000).toISOString(),
+			message: { role: "user", content: "third prompt" },
+		},
 	];
 	const history = await loadPromptHistory(
 		[source],
@@ -113,14 +94,12 @@ test("selects recent prompts globally instead of stopping at prompt-heavy sessio
 			const newest = index === 8;
 			return [
 				{
-					type: "custom",
-					customType: VERIFIED_PROMPT_ENTRY_TYPE,
+					type: "message",
 					id: `prompt-${index}`,
 					timestamp: new Date(now - (newest ? 10_000 : 100_000 + index)).toISOString(),
-					data: {
-						version: 1,
-						source: "interactive",
-						text: newest ? "globally newest" : `older ${index}`,
+					message: {
+						role: "user",
+						content: newest ? "globally newest" : `older ${index}`,
 					},
 				},
 			];
@@ -143,12 +122,15 @@ test("reads legacy session JSONL without modifying it", async () => {
 			cwd: "/private/project",
 		}),
 		JSON.stringify({
-			type: "custom",
-			customType: VERIFIED_PROMPT_ENTRY_TYPE,
+			type: "message",
 			id: "user-one",
 			parentId: null,
 			timestamp: "2026-01-01T00:00:01.000Z",
-			data: { version: 1, source: "interactive", text: "human prompt" },
+			message: {
+				role: "user",
+				content: "human prompt",
+				timestamp: 1_767_225_601_000,
+			},
 		}),
 	].join("\n");
 	try {

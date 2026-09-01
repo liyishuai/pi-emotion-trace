@@ -21,15 +21,6 @@ export type SessionSource = {
 	modified: Date;
 };
 
-export const VERIFIED_PROMPT_ENTRY_TYPE =
-	"pi-emotion-trace:verified-human-prompt";
-
-export type VerifiedPromptRecord = {
-	version: 1;
-	source: "interactive";
-	text: string;
-};
-
 export type HistoricalPrompt = {
 	id: string;
 	sessionId: string;

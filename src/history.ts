@@ -3,12 +3,11 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { historyWindowDays } from "./settings.ts";
-import {
-	VERIFIED_PROMPT_ENTRY_TYPE,
-	type AnalysisProgress,
-	type EmotionTraceSettings,
-	type HistoricalPrompt,
-	type SessionSource,
+import type {
+	AnalysisProgress,
+	EmotionTraceSettings,
+	HistoricalPrompt,
+	SessionSource,
 } from "./types.ts";
 
 const MAX_SESSION_FILES = 1_000;
@@ -30,11 +29,33 @@ function record(value: unknown): Record<string, unknown> | undefined {
 		: undefined;
 }
 
-function timestampFromEntry(entry: Record<string, unknown>): string | undefined {
-	const timestamp = entry.timestamp;
-	return typeof timestamp === "string" && Number.isFinite(Date.parse(timestamp))
-		? new Date(timestamp).toISOString()
-		: undefined;
+function contentText(content: unknown): string {
+	if (typeof content === "string") return content.trim();
+	if (!Array.isArray(content)) return "";
+	return content
+		.flatMap((part) => {
+			const block = record(part);
+			return block?.type === "text" && typeof block.text === "string"
+				? [block.text]
+				: [];
+		})
+		.join("\n")
+		.trim();
+}
+
+function timestampFromEntry(
+	entry: Record<string, unknown>,
+	message: Record<string, unknown>,
+): string | undefined {
+	const entryTimestamp = entry.timestamp;
+	if (typeof entryTimestamp === "string" && Number.isFinite(Date.parse(entryTimestamp))) {
+		return new Date(entryTimestamp).toISOString();
+	}
+	const messageTimestamp = message.timestamp;
+	if (typeof messageTimestamp === "number" && Number.isFinite(messageTimestamp)) {
+		return new Date(messageTimestamp).toISOString();
+	}
+	return undefined;
 }
 
 function parseSessionLine(line: string): unknown {
@@ -46,15 +67,11 @@ function parseSessionLine(line: string): unknown {
 }
 
 function keepRelevantLine(entries: unknown[], line: string): void {
-	if (!line.includes(VERIFIED_PROMPT_ENTRY_TYPE)) return;
+	if (!line.includes('"role"') || !line.includes('"user"')) return;
 	const value = parseSessionLine(line);
 	const entry = record(value);
-	if (
-		entry?.type === "custom" &&
-		entry.customType === VERIFIED_PROMPT_ENTRY_TYPE
-	) {
-		entries.push(value);
-	}
+	const message = record(entry?.message);
+	if (entry?.type === "message" && message?.role === "user") entries.push(value);
 }
 
 export async function readSessionEntriesReadOnly(
@@ -97,18 +114,12 @@ function promptsFromEntries(
 	const prompts: HistoricalPrompt[] = [];
 	for (const [index, rawEntry] of entries.entries()) {
 		const entry = record(rawEntry);
-		if (
-			!entry ||
-			entry.type !== "custom" ||
-			entry.customType !== VERIFIED_PROMPT_ENTRY_TYPE
-		) {
-			continue;
-		}
-		const data = record(entry.data);
-		if (data?.version !== 1 || data.source !== "interactive") continue;
-		const text = typeof data.text === "string" ? data.text.trim() : "";
+		if (!entry || entry.type !== "message") continue;
+		const message = record(entry.message);
+		if (!message || message.role !== "user") continue;
+		const text = contentText(message.content);
 		if (!text) continue;
-		const timestamp = timestampFromEntry(entry);
+		const timestamp = timestampFromEntry(entry, message);
 		if (!timestamp || Date.parse(timestamp) < cutoff) continue;
 		const entryId = typeof entry.id === "string" ? entry.id : String(index);
 		prompts.push({

@@ -1,6 +1,6 @@
 # pi-emotion-trace
 
-A Pi package that records direct interactive human prompts, classifies their expressed emotional tone and interaction signals, and generates a self-contained chronological timeline.
+A Pi package that extracts chronological user-prompt history, classifies expressed emotional tone and interaction signals, and generates a self-contained visual timeline.
 
 The report plots emotional valence from **−100 to +100** while independently surfacing prompts that steer, reject, correct, doubt, challenge evidence, reassert scope, approve, stop, or replace the agent's direction.
 
@@ -24,18 +24,7 @@ To try it without changing settings:
 pi -e git:github.com/liyishuai/pi-emotion-trace
 ```
 
-Reload Pi after installation so verified prompt capture begins.
-
-## Verified prompt provenance
-
-Pi's historical `role: "user"` session records do not preserve whether text was typed by a person or injected by an extension. Emotion Trace therefore does not guess. While the package is loaded, it records only `input` events whose source is `interactive` as dedicated, non-context session entries.
-
-This has two deliberate consequences:
-
-- extension-injected messages, RPC/API inputs, assistant content, and expanded skill or prompt-template bodies are excluded; and
-- prompts from before the package was installed and loaded are not available to the trace.
-
-A typed skill or prompt-template command is captured before expansion, so the human's command is analyzed instead of machine-authored expansion text.
+Reload Pi after installation.
 
 ## Commands
 
@@ -45,7 +34,7 @@ A typed skill or prompt-template command is captured before expansion, so the hu
 /emotion-trace
 ```
 
-The command runs immediately with saved settings, reads bounded verified-prompt entries from Pi session history, and writes the latest report under Pi's agent directory (normally):
+The command runs immediately with saved settings, reads bounded persisted `role: "user"` messages from existing Pi session history, and writes the latest report under Pi's agent directory (normally):
 
 ```text
 ~/.pi/agent/emotion-trace/report.html
@@ -74,7 +63,7 @@ Defaults are **90 days** and **500 prompts**. Changes save immediately; press Es
 
 ## What is classified
 
-Each verified interactive prompt receives two independent classifications.
+Each selected user-role prompt receives two independent classifications.
 
 ### Emotional tone
 
@@ -123,8 +112,8 @@ The chart uses inline SVG, CSS, and JavaScript and loads no external assets.
 
 ## Privacy and bounds
 
-- Direct interactive prompt text is stored in a dedicated custom entry inside its existing Pi session so its human provenance remains verifiable. The custom entry is not added to model context.
-- Verified prompt text is read locally and submitted transiently to the selected classifier model.
+- Persisted user-role prompt text is read locally and submitted transiently to the selected classifier model.
+- Pi session records do not distinguish typed prompts from extension-injected user messages, so those messages can appear in the analyzed history.
 - Full prompts are not stored as separate report fields. The report intentionally contains exact keywords and excerpts capped at 160 characters; a short prompt can therefore appear in full as its excerpt.
 - The report also contains prompt timestamps, scores, labels, and interaction signals.
 - Keyword and excerpt outputs are host-validated against their source prompt.

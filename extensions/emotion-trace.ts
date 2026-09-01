@@ -32,11 +32,9 @@ import {
 	HISTORY_WINDOWS,
 	MODEL_CATALOGS,
 	PROMPT_LIMITS,
-	VERIFIED_PROMPT_ENTRY_TYPE,
 	type AnalysisProgress,
 	type EmotionTraceSettings,
 	type ModelCatalog,
-	type VerifiedPromptRecord,
 } from "../src/types.ts";
 
 const CLASSIFIER_SKILL_URL = new URL(
@@ -268,19 +266,6 @@ async function openReport(pi: ExtensionAPI): Promise<boolean> {
 }
 
 export default function emotionTraceExtension(pi: ExtensionAPI): void {
-	pi.on("input", (event) => {
-		const text = event.text.trim();
-		if (event.source === "interactive" && text) {
-			const record: VerifiedPromptRecord = {
-				version: 1,
-				source: "interactive",
-				text,
-			};
-			pi.appendEntry(VERIFIED_PROMPT_ENTRY_TYPE, record);
-		}
-		return { action: "continue" };
-	});
-
 	pi.registerCommand("emotion-trace-config", {
 		description: "Configure prompt history scope and emotion classifier model",
 		handler: async (_args, ctx) => {
@@ -304,7 +289,7 @@ export default function emotionTraceExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("emotion-trace", {
-		description: "Visualize emotion and interaction signals across verified prompts",
+		description: "Visualize emotion and interaction signals across prompt history",
 		handler: async (_args, ctx) => {
 			if (ctx.mode !== "tui") {
 				ctx.ui.notify("/emotion-trace requires TUI mode", "warning");
@@ -348,7 +333,7 @@ export default function emotionTraceExtension(pi: ExtensionAPI): void {
 				);
 				if (result.points.length === 0) {
 					ctx.ui.notify(
-						"No verified interactive prompts were found. Capture begins after the package is loaded.",
+						"No user prompts were found in the selected history window.",
 						"warning",
 					);
 					return;

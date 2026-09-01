@@ -1,11 +1,11 @@
 {
   "name": "pi-emotion-trace",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "exports": {
     "./skills/emotion-trace-classifier": "./skills/emotion-trace-classifier/SKILL.md"
   },
-  "description": "Visualize emotion and interaction signals across verified Pi prompts",
+  "description": "Visualize emotion and interaction signals across Pi prompt history",
   "license": "MPL-2.0",
   "homepage": "https://github.com/liyishuai/pi-emotion-trace",
   "repository": {
