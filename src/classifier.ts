@@ -27,7 +27,7 @@ const SIGNALS = new Set<string>(SIGNAL_TAGS);
 
 type RawClassification = {
 	prompt_ref?: unknown;
-	valence?: unknown;
+	score?: unknown;
 	emotion?: unknown;
 	confidence?: unknown;
 	emotion_keywords?: unknown;
@@ -183,10 +183,10 @@ function parseResponse(text: string): unknown[] {
 	}
 }
 
-function validValence(value: unknown): number | undefined {
+function validScore(value: unknown): number | undefined {
 	return typeof value === "number" &&
 		Number.isInteger(value) &&
-		value >= -100 &&
+		value >= 0 &&
 		value <= 100
 		? value
 		: undefined;
@@ -239,7 +239,7 @@ function classificationFor(
 	item: BatchItem,
 	raw: RawClassification,
 ): PromptTracePoint | undefined {
-	const valence = validValence(raw.valence);
+	const score = validScore(raw.score);
 	const emotion = validEnum<EmotionLabel>(raw.emotion, EMOTIONS);
 	const confidence = validConfidence(raw.confidence);
 	const interactionKind = validEnum<InteractionKind>(
@@ -251,7 +251,7 @@ function classificationFor(
 	const signalKeywords = exactSpans(item.prompt.text, raw.signal_keywords);
 	const excerpt = exactSpan(item.prompt.text, raw.excerpt, 160);
 	if (
-		valence === undefined ||
+		score === undefined ||
 		!emotion ||
 		!confidence ||
 		!interactionKind ||
@@ -266,7 +266,7 @@ function classificationFor(
 	return {
 		id: item.prompt.id,
 		timestamp: item.prompt.timestamp,
-		valence,
+		score,
 		emotion,
 		confidence,
 		emotionKeywords,

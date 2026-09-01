@@ -65,7 +65,7 @@ export type SignalTag = (typeof SIGNAL_TAGS)[number];
 export type PromptTracePoint = {
 	id: string;
 	timestamp: string;
-	valence: number;
+	score: number;
 	emotion: EmotionLabel;
 	confidence: Confidence;
 	emotionKeywords: string[];

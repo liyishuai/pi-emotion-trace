@@ -173,7 +173,7 @@ test("accepts only well-formed skill classifications", () => {
 	const validClassifications = [
 		{
 			prompt_ref: "P0001",
-			valence: 0,
+			score: 50,
 			emotion: "neutral",
 			confidence: "high",
 			emotion_keywords: [],
@@ -184,7 +184,7 @@ test("accepts only well-formed skill classifications", () => {
 		},
 		{
 			prompt_ref: "P0002",
-			valence: -52,
+			score: 24,
 			emotion: "frustrated",
 			confidence: "high",
 			emotion_keywords: ["not what I asked"],
@@ -218,13 +218,13 @@ test("accepts only well-formed skill classifications", () => {
 		plan.batches[0]!,
 	);
 	assert.deepEqual(withoutInvalidSignals.map(({ id }) => id), ["one"]);
-	const invalidValence = structuredClone(validClassifications);
-	invalidValence[0]!.valence = "0" as unknown as number;
-	const withoutInvalidValence = parseClassificationBatch(
-		JSON.stringify({ classifications: invalidValence }),
+	const invalidScore = structuredClone(validClassifications);
+	invalidScore[0]!.score = "50" as unknown as number;
+	const withoutInvalidScore = parseClassificationBatch(
+		JSON.stringify({ classifications: invalidScore }),
 		plan.batches[0]!,
 	);
-	assert.deepEqual(withoutInvalidValence.map(({ id }) => id), ["two"]);
+	assert.deepEqual(withoutInvalidScore.map(({ id }) => id), ["two"]);
 });
 
 test("retries malformed skill output without scripting a replacement", async () => {
@@ -247,7 +247,7 @@ test("retries malformed skill output without scripting a replacement", async () 
 			classifications: [
 				{
 					prompt_ref: "P0001",
-					valence: attempts === 1 ? "-30" : -30,
+					score: attempts === 1 ? "35" : 35,
 					emotion: "uncertain",
 					confidence: "high",
 					emotion_keywords: ["I doubt"],
@@ -261,7 +261,7 @@ test("retries malformed skill output without scripting a replacement", async () 
 	});
 	assert.equal(attempts, 2);
 	assert.equal(points.length, 1);
-	assert.equal(points[0]!.valence, -30);
+	assert.equal(points[0]!.score, 35);
 });
 
 test("the classifier character cap keeps the newest prompts", () => {
@@ -300,7 +300,7 @@ test("renders an escaped, self-contained report with interaction filters", () =>
 			{
 				id: "one",
 				timestamp,
-				valence: -30,
+				score: 35,
 				emotion: "uncertain",
 				confidence: "high",
 				emotionKeywords: ["doubt"],

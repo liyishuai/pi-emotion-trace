@@ -2,7 +2,7 @@
 
 A Pi package that extracts chronological user-prompt history, classifies expressed emotional tone and interaction signals, and generates a self-contained visual timeline.
 
-The report plots emotional valence from **−100 to +100** while independently surfacing prompts that steer, reject, correct, doubt, challenge evidence, reassert scope, approve, stop, or replace the agent's direction.
+The report plots an emotional score from **0 to 100**, with **50 as neutral**, while independently surfacing prompts that steer, reject, correct, doubt, challenge evidence, reassert scope, approve, stop, or replace the agent's direction.
 
 ## Install
 
@@ -67,7 +67,7 @@ Each selected user-role prompt receives two independent classifications.
 
 ### Emotional tone
 
-- valence score from −100 to +100;
+- emotional score from 0 to 100, with 50 as neutral;
 - one observable emotion label;
 - high, medium, or low confidence;
 - one to three exact emotional keywords; and
@@ -89,13 +89,15 @@ Each prompt is classified as a request, steering, response, or other content. It
 - stop request; or
 - replacement request.
 
-Interaction signals are not treated as emotions. A rejection, doubt, or correction can have neutral emotional valence.
+Interaction signals are not treated as emotions. A rejection, doubt, or correction can have a neutral emotional score of 50.
 
 ## Visualization
 
 The responsive local HTML report contains:
 
-- a chronological valence line colored from negative through neutral to positive;
+- a smooth chronological score curve colored from negative through neutral to positive;
+- equal horizontal spacing for every plotted prompt, regardless of elapsed time;
+- neutral prompts excluded from the curve but retained in the timeline table;
 - diamonds for steering prompts;
 - crosses for rejections;
 - question marks for doubts;
@@ -108,7 +110,7 @@ The chart uses inline SVG, CSS, and JavaScript and loads no external assets.
 
 ## Packaged skill
 
-`skills/emotion-trace-classifier/SKILL.md` is the sole authority for emotional and interaction semantics. The TypeScript host only extracts bounded history, accepts well-formed skill results, and renders the report; it does not calculate or invent classifications. Malformed skill results are retried once and then omitted without failing the run. If the configured model cannot return skill output because of a transport or quota error, the host may run the same skill with `openai-codex/gpt-5.6-luna`.
+`skills/emotion-trace-classifier/SKILL.md` is the sole authority for the emotional score and interaction semantics. The configured model returns each score while applying that skill. The TypeScript host only extracts bounded history, accepts well-formed skill results, and renders the report; it does not calculate, predict, or invent scores or classifications. Malformed skill results are retried once and then omitted without failing the run. If the configured model cannot return skill output because of a transport or quota error, the host may run the same skill with `openai-codex/gpt-5.6-luna`.
 
 Pi discovers the portable skill as `/skill:emotion-trace-classifier`. Another Agent Skills-compatible host can reuse it by providing chronological prompt batches and accepting the structured JSON contract.
 
