@@ -1,0 +1,309 @@
+// SPDX-License-Identifier: MPL-2.0
+
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import emotionTraceExtension from "../extensions/emotion-trace.ts";
+import {
+	buildClassificationPlan,
+	parseClassificationBatch,
+} from "../src/classifier.ts";
+import {
+	loadPromptHistory,
+	readSessionEntriesReadOnly,
+} from "../src/history.ts";
+import { renderEmotionTraceHtml } from "../src/report.ts";
+import {
+	VERIFIED_PROMPT_ENTRY_TYPE,
+	type EmotionTraceResult,
+	type EmotionTraceSettings,
+	type HistoricalPrompt,
+	type SessionSource,
+} from "../src/types.ts";
+
+const settings: EmotionTraceSettings = {
+	historyWindow: "90d",
+	maxPrompts: 2,
+	modelCatalog: "scoped",
+	classifierModel: "example/model",
+};
+
+test("records only direct interactive input as verified human prompts", () => {
+	let inputHandler:
+		| ((event: { type: "input"; text: string; source: string }) => unknown)
+		| undefined;
+	const appended: Array<{ customType: string; data: unknown }> = [];
+	const fakePi = {
+		on(eventType: string, handler: typeof inputHandler) {
+			if (eventType === "input") inputHandler = handler;
+		},
+		appendEntry(customType: string, data: unknown) {
+			appended.push({ customType, data });
+		},
+		registerCommand() {},
+	} as unknown as ExtensionAPI;
+	emotionTraceExtension(fakePi);
+	assert.ok(inputHandler);
+	inputHandler({ type: "input", text: "  human prompt  ", source: "interactive" });
+	inputHandler({ type: "input", text: "injected", source: "extension" });
+	inputHandler({ type: "input", text: "rpc input", source: "rpc" });
+	assert.deepEqual(appended, [
+		{
+			customType: VERIFIED_PROMPT_ENTRY_TYPE,
+			data: { version: 1, source: "interactive", text: "human prompt" },
+		},
+	]);
+});
+
+test("loads only chronological human prompts and keeps the newest limit", async () => {
+	const now = Date.now();
+	const source: SessionSource = {
+		id: "session-one",
+		path: "/private/session-one.jsonl",
+		created: new Date(now - 10_000),
+		modified: new Date(now),
+	};
+	const verified = (id: string, text: string, timestamp: number) => ({
+		type: "custom",
+		customType: VERIFIED_PROMPT_ENTRY_TYPE,
+		id,
+		timestamp: new Date(timestamp).toISOString(),
+		data: { version: 1, source: "interactive", text },
+	});
+	const entries = [
+		verified("u1", "first prompt", now - 3_000),
+		{
+			type: "message",
+			id: "injected",
+			timestamp: new Date(now - 2_500).toISOString(),
+			message: { role: "user", content: "extension-injected text" },
+		},
+		verified("u2", "second prompt", now - 2_000),
+		verified("u3", "third prompt", now - 1_000),
+	];
+	const history = await loadPromptHistory(
+		[source],
+		async () => entries,
+		settings,
+	);
+	assert.deepEqual(
+		history.prompts.map(({ text }) => text),
+		["second prompt", "third prompt"],
+	);
+	assert.equal(history.sessionsRead, 1);
+	assert.equal(history.promptsFound, 3);
+	assert.equal(history.truncated, true);
+});
+
+test("selects recent prompts globally instead of stopping at prompt-heavy sessions", async () => {
+	const now = Date.now();
+	const sources: SessionSource[] = Array.from({ length: 9 }, (_, index) => ({
+		id: `session-${index}`,
+		path: `/private/session-${index}.jsonl`,
+		created: new Date(now - 200_000),
+		modified: new Date(now - index * 1_000),
+	}));
+	const history = await loadPromptHistory(
+		sources,
+		async (source) => {
+			const index = Number(source.id.slice("session-".length));
+			const newest = index === 8;
+			return [
+				{
+					type: "custom",
+					customType: VERIFIED_PROMPT_ENTRY_TYPE,
+					id: `prompt-${index}`,
+					timestamp: new Date(now - (newest ? 10_000 : 100_000 + index)).toISOString(),
+					data: {
+						version: 1,
+						source: "interactive",
+						text: newest ? "globally newest" : `older ${index}`,
+					},
+				},
+			];
+		},
+		{ ...settings, maxPrompts: 1 },
+	);
+	assert.equal(history.sessionsRead, 9);
+	assert.deepEqual(history.prompts.map(({ text }) => text), ["globally newest"]);
+});
+
+test("reads legacy session JSONL without modifying it", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "emotion-trace-history-"));
+	const path = join(directory, "session.jsonl");
+	const content = [
+		JSON.stringify({
+			type: "session",
+			version: 1,
+			id: "legacy-session",
+			timestamp: "2026-01-01T00:00:00.000Z",
+			cwd: "/private/project",
+		}),
+		JSON.stringify({
+			type: "custom",
+			customType: VERIFIED_PROMPT_ENTRY_TYPE,
+			id: "user-one",
+			parentId: null,
+			timestamp: "2026-01-01T00:00:01.000Z",
+			data: { version: 1, source: "interactive", text: "human prompt" },
+		}),
+	].join("\n");
+	try {
+		await writeFile(path, content, "utf8");
+		const entries = await readSessionEntriesReadOnly({
+			id: "legacy-session",
+			path,
+			created: new Date("2026-01-01T00:00:00.000Z"),
+			modified: new Date("2026-01-01T00:00:01.000Z"),
+		});
+		assert.equal(entries.length, 1);
+		assert.equal(await readFile(path, "utf8"), content);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test("validates model classifications and interaction invariants", () => {
+	const timestamp = new Date().toISOString();
+	const prompts: HistoricalPrompt[] = [
+		{
+			id: "one",
+			sessionId: "private-session-id",
+			timestamp,
+			text: "Please draw a chart.",
+		},
+		{
+			id: "two",
+			sessionId: "private-session-id",
+			timestamp,
+			text: "No, that is not what I asked. Stop and use a line chart.",
+		},
+	];
+	const plan = buildClassificationPlan(prompts, "classifier instructions");
+	assert.equal(plan.promptCount, 2);
+	assert.match(plan.batches[0]!.prompt, /"session_ref":"S0001"/);
+	assert.match(plan.batches[0]!.prompt, /"previous_user_text":"Please draw a chart\."/);
+	assert.doesNotMatch(plan.batches[0]!.prompt, /private-session-id/);
+	const validClassifications = [
+		{
+			prompt_ref: "P0001",
+			valence: 0,
+			emotion: "neutral",
+			confidence: "high",
+			emotion_keywords: [],
+			excerpt: "Please draw a chart.",
+			interaction_kind: "request",
+			signals: [],
+			signal_keywords: [],
+		},
+		{
+			prompt_ref: "P0002",
+			valence: -52,
+			emotion: "frustrated",
+			confidence: "high",
+			emotion_keywords: ["not what I asked"],
+			excerpt: "No, that is not what I asked. Stop and use a line chart.",
+			interaction_kind: "steering",
+			signals: ["steering", "rejection", "correction"],
+			signal_keywords: ["Stop"],
+		},
+	];
+	const points = parseClassificationBatch(
+		JSON.stringify({ classifications: validClassifications }),
+		plan.batches[0]!,
+	);
+	assert.deepEqual(points[0]!.signals, []);
+	assert.deepEqual(points[0]!.emotionKeywords, []);
+	assert.deepEqual(points[1]!.signals, ["steering", "rejection", "correction"]);
+	assert.deepEqual(points[1]!.signalKeywords, ["Stop"]);
+	assert.equal(
+		points[1]!.excerpt,
+		"No, that is not what I asked. Stop and use a line chart.",
+	);
+	assert.throws(
+		() =>
+			parseClassificationBatch(
+				JSON.stringify({ classifications: validClassifications.slice(0, 1) }),
+				plan.batches[0]!,
+			),
+		/returned 1 classifications for 2 prompts/,
+	);
+	const malformed = structuredClone(validClassifications);
+	malformed[1]!.signals = ["rejection", "correction"];
+	assert.throws(
+		() =>
+			parseClassificationBatch(
+				JSON.stringify({ classifications: malformed }),
+				plan.batches[0]!,
+			),
+		/invalid steering signal invariant/,
+	);
+	const invalidValence = structuredClone(validClassifications);
+	invalidValence[0]!.valence = "0" as unknown as number;
+	assert.throws(
+		() =>
+			parseClassificationBatch(
+				JSON.stringify({ classifications: invalidValence }),
+				plan.batches[0]!,
+			),
+		/invalid valence/,
+	);
+});
+
+test("the classifier character cap keeps the newest prompts", () => {
+	const prompts: HistoricalPrompt[] = Array.from({ length: 100 }, (_, index) => ({
+		id: `prompt-${index}`,
+		sessionId: "one-session",
+		timestamp: new Date(1_700_000_000_000 + index).toISOString(),
+		text: `${index}: ${"x".repeat(2_200)}`,
+	}));
+	const plan = buildClassificationPlan(prompts, "classifier instructions");
+	const selected = plan.batches.flatMap((batch) => batch.items);
+	assert.equal(plan.truncated, true);
+	assert.ok(plan.promptCount < prompts.length);
+	assert.notEqual(selected[0]!.prompt.id, "prompt-0");
+	assert.equal(selected.at(-1)!.prompt.id, "prompt-99");
+	assert.ok(plan.promptCharacters <= 180_000);
+});
+
+test("renders an escaped, self-contained report with interaction filters", () => {
+	const timestamp = new Date().toISOString();
+	const result: EmotionTraceResult = {
+		generatedAt: timestamp,
+		historyWindow: "90d",
+		model: "example/model",
+		coverage: {
+			sessionsDiscovered: 1,
+			sessionsRead: 1,
+			promptsFound: 1,
+			promptsAnalyzed: 1,
+			charactersSubmitted: 20,
+			truncated: false,
+		},
+		points: [
+			{
+				id: "one",
+				timestamp,
+				valence: -30,
+				emotion: "uncertain",
+				confidence: "high",
+				emotionKeywords: ["doubt"],
+				excerpt: "I doubt </script><script>alert(1)</script>",
+				interactionKind: "steering",
+				signals: ["steering", "doubt"],
+				signalKeywords: ["doubt"],
+			},
+		],
+	};
+	const html = renderEmotionTraceHtml(result);
+	assert.match(html, /Content-Security-Policy/);
+	assert.match(html, /data-filter="steering"/);
+	assert.match(html, /data-filter="rejection"/);
+	assert.match(html, /data-filter="doubt"/);
+	assert.match(html, /&lt;\/script&gt;&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+	assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
+	assert.doesNotMatch(html, /<script src=/);
+});

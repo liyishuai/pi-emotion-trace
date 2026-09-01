@@ -1,0 +1,57 @@
+{
+  "name": "pi-emotion-trace",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./skills/emotion-trace-classifier": "./skills/emotion-trace-classifier/SKILL.md"
+  },
+  "description": "Visualize emotion and interaction signals across verified Pi prompts",
+  "license": "MPL-2.0",
+  "homepage": "https://github.com/liyishuai/pi-emotion-trace",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liyishuai/pi-emotion-trace.git"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "prompt-history",
+    "emotion-analysis",
+    "conversation-analysis",
+    "data-visualization",
+    "agent-skills"
+  ],
+  "files": [
+    "extensions",
+    "skills",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/emotion-trace.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-tui": "^0.84.4",
+    "@types/node": "^24.10.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19"
+  }
+}
