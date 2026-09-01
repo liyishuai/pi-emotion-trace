@@ -53,7 +53,7 @@ The configuration panel controls:
 - **History window** — 7, 30, 90, 180, or 365 days, or all history;
 - **Prompt limit** — 100, 250, 500, or 1,000 recent prompts;
 - **Model catalog** — Pi's scoped models or all authenticated models; and
-- **Classifier model** — defaults to `openai-codex/gpt-5.3-codex-spark`.
+- **Classifier model** — defaults to `openai-codex/gpt-5.3-codex-spark`; transport or quota failures can fall back to `openai-codex/gpt-5.6-luna`.
 
 Defaults are **90 days** and **500 prompts**. Changes save immediately; press Escape to close the panel. Settings are stored under Pi's agent directory (normally):
 
@@ -108,7 +108,9 @@ The chart uses inline SVG, CSS, and JavaScript and loads no external assets.
 
 ## Packaged skill
 
-`skills/emotion-trace-classifier/SKILL.md` defines the portable classification rubric and structured JSON contract. Pi discovers it as `/skill:emotion-trace-classifier`. Another Agent Skills-compatible host can reuse it by providing chronological prompt batches and validating the returned schema.
+`skills/emotion-trace-classifier/SKILL.md` is the sole authority for emotional and interaction semantics. The TypeScript host only extracts bounded history, accepts well-formed skill results, and renders the report; it does not calculate or invent classifications. Malformed skill results are retried once and then omitted without failing the run. If the configured model cannot return skill output because of a transport or quota error, the host may run the same skill with `openai-codex/gpt-5.6-luna`.
+
+Pi discovers the portable skill as `/skill:emotion-trace-classifier`. Another Agent Skills-compatible host can reuse it by providing chronological prompt batches and accepting the structured JSON contract.
 
 ## Privacy and bounds
 
@@ -116,7 +118,7 @@ The chart uses inline SVG, CSS, and JavaScript and loads no external assets.
 - Pi session records do not distinguish typed prompts from extension-injected user messages, so those messages can appear in the analyzed history.
 - Full prompts are not stored as separate report fields. The report intentionally contains exact keywords and excerpts capped at 160 characters; a short prompt can therefore appear in full as its excerpt.
 - The report also contains prompt timestamps, scores, labels, and interaction signals.
-- Keyword and excerpt outputs are host-validated against their source prompt.
+- The host accepts only well-formed bounded labels, signals, keywords, and exact excerpts. It never supplies semantic fallback values.
 - The latest report replaces the previous report and is written with user-only file permissions.
 - A run inspects at most 1,000 recently modified session files.
 - Model batches contain at most 80 prompts and 45,000 prompt characters.

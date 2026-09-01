@@ -19,6 +19,7 @@ const MAX_TOTAL_CHARACTERS = 180_000;
 const MAX_PROMPT_CHARACTERS = 2_400;
 const MAX_PREVIOUS_PROMPT_CHARACTERS = 600;
 const CLASSIFICATION_CONCURRENCY = 4;
+const SKILL_ATTEMPTS = 2;
 
 const EMOTIONS = new Set<string>(EMOTION_LABELS);
 const INTERACTIONS = new Set<string>(INTERACTION_KINDS);
@@ -48,6 +49,7 @@ type BatchItem = {
 export type ClassificationBatch = {
 	items: BatchItem[];
 	prompt: string;
+	skill: string;
 };
 
 export type ClassificationPlan = {
@@ -138,7 +140,7 @@ export function buildClassificationPlan(
 	let pendingCharacters = 0;
 	const flush = () => {
 		if (pending.length === 0) return;
-		batches.push({ items: pending, prompt: batchPrompt(pending, skill) });
+		batches.push({ items: pending, prompt: batchPrompt(pending, skill), skill });
 		pending = [];
 		pendingCharacters = 0;
 	};
@@ -181,116 +183,86 @@ function parseResponse(text: string): unknown[] {
 	}
 }
 
-function invalidField(ref: string, field: string): never {
-	throw new Error(`The classifier returned invalid ${field} for ${ref}`);
+function validValence(value: unknown): number | undefined {
+	return typeof value === "number" &&
+		Number.isInteger(value) &&
+		value >= -100 &&
+		value <= 100
+		? value
+		: undefined;
 }
 
-function requireValence(value: unknown, ref: string): number {
-	if (
-		typeof value !== "number" ||
-		!Number.isInteger(value) ||
-		value < -100 ||
-		value > 100
-	) {
-		invalidField(ref, "valence");
-	}
-	return value;
-}
-
-function requireEnum<T extends string>(
+function validEnum<T extends string>(
 	value: unknown,
 	allowed: Set<string>,
-	ref: string,
-	field: string,
-): T {
-	if (typeof value !== "string" || !allowed.has(value)) invalidField(ref, field);
-	return value as T;
+): T | undefined {
+	return typeof value === "string" && allowed.has(value)
+		? (value as T)
+		: undefined;
 }
 
-function requireConfidence(value: unknown, ref: string): Confidence {
-	if (value !== "high" && value !== "medium" && value !== "low") {
-		invalidField(ref, "confidence");
-	}
-	return value;
+function validConfidence(value: unknown): Confidence | undefined {
+	return value === "high" || value === "medium" || value === "low"
+		? value
+		: undefined;
 }
 
-function requireExactSpan(
+function exactSpan(
 	source: string,
 	value: unknown,
 	maxLength: number,
-	ref: string,
-	field: string,
-): string {
-	if (typeof value !== "string") invalidField(ref, field);
+): string | undefined {
+	if (typeof value !== "string") return undefined;
 	const candidate = value.trim();
-	if (!candidate || candidate.length > maxLength) invalidField(ref, field);
+	if (!candidate || candidate.length > maxLength) return undefined;
 	const index = source.toLowerCase().indexOf(candidate.toLowerCase());
-	if (index < 0) invalidField(ref, field);
-	return source.slice(index, index + candidate.length);
+	return index < 0 ? undefined : source.slice(index, index + candidate.length);
 }
 
-function requireExactSpans(
-	source: string,
-	value: unknown,
-	ref: string,
-	field: string,
-): string[] {
-	if (!Array.isArray(value) || value.length > 3) invalidField(ref, field);
-	const spans = value.map((candidate) =>
-		requireExactSpan(source, candidate, 40, ref, field),
-	);
-	if (new Set(spans).size !== spans.length) invalidField(ref, field);
-	return spans;
+function exactSpans(source: string, value: unknown): string[] | undefined {
+	if (!Array.isArray(value) || value.length > 3) return undefined;
+	const spans = value.map((candidate) => exactSpan(source, candidate, 40));
+	if (spans.some((span) => span === undefined)) return undefined;
+	const complete = spans as string[];
+	return new Set(complete).size === complete.length ? complete : undefined;
 }
 
-function requireSignals(value: unknown, ref: string): SignalTag[] {
-	if (!Array.isArray(value) || value.length > SIGNAL_TAGS.length) {
-		invalidField(ref, "signals");
-	}
-	const signals = value.map((signal) =>
-		requireEnum<SignalTag>(signal, SIGNALS, ref, "signals"),
-	);
-	if (new Set(signals).size !== signals.length) invalidField(ref, "signals");
-	return signals;
+function validSignals(value: unknown): SignalTag[] | undefined {
+	if (!Array.isArray(value) || value.length > SIGNAL_TAGS.length) return undefined;
+	const signals = value.map((signal) => validEnum<SignalTag>(signal, SIGNALS));
+	if (signals.some((signal) => signal === undefined)) return undefined;
+	const complete = signals as SignalTag[];
+	return new Set(complete).size === complete.length ? complete : undefined;
 }
 
 function classificationFor(
 	item: BatchItem,
 	raw: RawClassification,
-): PromptTracePoint {
-	const ref = item.ref;
-	const valence = requireValence(raw.valence, ref);
-	const emotion = requireEnum<EmotionLabel>(raw.emotion, EMOTIONS, ref, "emotion");
-	const confidence = requireConfidence(raw.confidence, ref);
-	const interactionKind = requireEnum<InteractionKind>(
+): PromptTracePoint | undefined {
+	const valence = validValence(raw.valence);
+	const emotion = validEnum<EmotionLabel>(raw.emotion, EMOTIONS);
+	const confidence = validConfidence(raw.confidence);
+	const interactionKind = validEnum<InteractionKind>(
 		raw.interaction_kind,
 		INTERACTIONS,
-		ref,
-		"interaction_kind",
 	);
-	const signals = requireSignals(raw.signals, ref);
-	if ((interactionKind === "steering") !== signals.includes("steering")) {
-		invalidField(ref, "steering signal invariant");
+	const signals = validSignals(raw.signals);
+	const emotionKeywords = exactSpans(item.prompt.text, raw.emotion_keywords);
+	const signalKeywords = exactSpans(item.prompt.text, raw.signal_keywords);
+	const excerpt = exactSpan(item.prompt.text, raw.excerpt, 160);
+	if (
+		valence === undefined ||
+		!emotion ||
+		!confidence ||
+		!interactionKind ||
+		!signals ||
+		!emotionKeywords ||
+		!signalKeywords ||
+		!excerpt ||
+		(interactionKind === "steering") !== signals.includes("steering")
+	) {
+		return undefined;
 	}
-	const emotionKeywords = requireExactSpans(
-		item.prompt.text,
-		raw.emotion_keywords,
-		ref,
-		"emotion_keywords",
-	);
-	const signalKeywords = requireExactSpans(
-		item.prompt.text,
-		raw.signal_keywords,
-		ref,
-		"signal_keywords",
-	);
-	const excerpt = requireExactSpan(
-		item.prompt.text,
-		raw.excerpt,
-		160,
-		ref,
-		"excerpt",
-	);
 	return {
 		id: item.prompt.id,
 		timestamp: item.prompt.timestamp,
@@ -309,29 +281,29 @@ export function parseClassificationBatch(
 	response: string,
 	batch: ClassificationBatch,
 ): PromptTracePoint[] {
-	const parsed = parseResponse(response);
-	if (parsed.length !== batch.items.length) {
-		throw new Error(
-			`The classifier returned ${parsed.length} classifications for ${batch.items.length} prompts`,
-		);
-	}
 	const expectedRefs = new Set(batch.items.map((item) => item.ref));
 	const byRef = new Map<string, RawClassification>();
-	for (const value of parsed) {
+	const duplicates = new Set<string>();
+	for (const value of parseResponse(response)) {
 		const raw = objectValue(value);
-		if (!raw || typeof raw.prompt_ref !== "string") {
-			throw new Error("The classifier returned a classification without a prompt_ref");
+		if (
+			!raw ||
+			typeof raw.prompt_ref !== "string" ||
+			!expectedRefs.has(raw.prompt_ref)
+		) {
+			continue;
 		}
 		const ref = raw.prompt_ref;
-		if (!expectedRefs.has(ref)) {
-			throw new Error(`The classifier returned unexpected reference ${ref}`);
-		}
-		if (byRef.has(ref)) {
-			throw new Error(`The classifier returned duplicate reference ${ref}`);
-		}
-		byRef.set(ref, raw as RawClassification);
+		if (byRef.has(ref)) duplicates.add(ref);
+		else byRef.set(ref, raw as RawClassification);
 	}
-	return batch.items.map((item) => classificationFor(item, byRef.get(item.ref)!));
+	return batch.items.flatMap((item) => {
+		if (duplicates.has(item.ref)) return [];
+		const raw = byRef.get(item.ref);
+		if (!raw) return [];
+		const point = classificationFor(item, raw);
+		return point ? [point] : [];
+	});
 }
 
 export async function classifyPromptHistory(
@@ -346,8 +318,34 @@ export async function classifyPromptHistory(
 		const batch = plan.batches.slice(index, index + CLASSIFICATION_CONCURRENCY);
 		const results = await Promise.all(
 			batch.map(async (item) => {
+				const accepted = new Map<string, PromptTracePoint>();
+				let attemptBatch = item;
 				try {
-					return parseClassificationBatch(await callModel(item.prompt), item);
+					for (let attempt = 0; attempt < SKILL_ATTEMPTS; attempt++) {
+						try {
+							for (const point of parseClassificationBatch(
+								await callModel(attemptBatch.prompt),
+								attemptBatch,
+							)) {
+								if (!accepted.has(point.id)) accepted.set(point.id, point);
+							}
+						} catch {
+							// Retry the skill call; scripts never invent semantic classifications.
+						}
+						const missing = item.items.filter(
+							({ prompt }) => !accepted.has(prompt.id),
+						);
+						if (missing.length === 0) break;
+						attemptBatch = {
+							items: missing,
+							prompt: batchPrompt(missing, item.skill),
+							skill: item.skill,
+						};
+					}
+					return item.items.flatMap(({ prompt }) => {
+						const point = accepted.get(prompt.id);
+						return point ? [point] : [];
+					});
 				} finally {
 					completed++;
 					onProgress?.({

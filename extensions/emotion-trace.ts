@@ -24,6 +24,7 @@ import { renderEmotionTraceHtml } from "../src/report.ts";
 import {
 	DEFAULT_CLASSIFIER_MODEL,
 	EMOTION_TRACE_DIRECTORY,
+	FALLBACK_CLASSIFIER_MODEL,
 	EMOTION_TRACE_REPORT_PATH,
 	loadEmotionTraceSettings,
 	saveEmotionTraceSettings,
@@ -238,9 +239,14 @@ async function callModel(
 			},
 		],
 	});
-	return response.content
+	const text = response.content
 		.flatMap((content) => (content.type === "text" ? [content.text] : []))
 		.join("");
+	if (response.stopReason === "error") {
+		throw new Error(response.errorMessage || `${modelLabel(model)} returned an error`);
+	}
+	if (!text.trim()) throw new Error(`${modelLabel(model)} returned no skill output`);
+	return text;
 }
 
 async function writeReport(html: string): Promise<void> {
@@ -298,6 +304,31 @@ export default function emotionTraceExtension(pi: ExtensionAPI): void {
 			try {
 				const settings = loadEmotionTraceSettings();
 				const model = resolveModel(ctx, settings);
+				const classifierModels: ClassifierModel[] = [model];
+				const lunaFallback = availableModels(ctx, "all").find(
+					(candidate) => modelLabel(candidate) === FALLBACK_CLASSIFIER_MODEL,
+				);
+				if (lunaFallback && modelLabel(lunaFallback) !== modelLabel(model)) {
+					classifierModels.push(lunaFallback);
+				}
+				const disabledModels = new Set<string>();
+				const usedModels = new Set<string>();
+				const callClassifier = async (prompt: string): Promise<string> => {
+					let lastError: unknown;
+					for (const candidate of classifierModels) {
+						const label = modelLabel(candidate);
+						if (disabledModels.has(label)) continue;
+						try {
+							const text = await callModel(ctx, candidate, prompt);
+							usedModels.add(label);
+							return text;
+						} catch (error) {
+							disabledModels.add(label);
+							lastError = error;
+						}
+					}
+					throw lastError ?? new Error("No classifier model produced skill output");
+				};
 				if (settings.classifierModel !== modelLabel(model)) {
 					settings.classifierModel = modelLabel(model);
 					persistSettings(ctx, settings);
@@ -323,7 +354,7 @@ export default function emotionTraceExtension(pi: ExtensionAPI): void {
 				const result = await analyzeEmotionHistory(
 					sources,
 					readSessionEntriesReadOnly,
-					async (prompt) => callModel(ctx, model, prompt),
+					callClassifier,
 					classifierSkill,
 					settings,
 					modelLabel(model),
@@ -331,9 +362,12 @@ export default function emotionTraceExtension(pi: ExtensionAPI): void {
 						ctx.ui.setWidget("emotion-trace", progressLines(progress));
 					},
 				);
+				if (usedModels.size > 0) result.model = [...usedModels].join(" → ");
 				if (result.points.length === 0) {
 					ctx.ui.notify(
-						"No user prompts were found in the selected history window.",
+						result.coverage.promptsFound === 0
+							? "No user prompts were found in the selected history window."
+							: "The classifier skill returned no well-formed results after retry.",
 						"warning",
 					);
 					return;
@@ -344,8 +378,9 @@ export default function emotionTraceExtension(pi: ExtensionAPI): void {
 					progressLines({ phase: "visualization", completed: 1, total: 1 }),
 				);
 				const opened = await openReport(pi);
+				const omitted = result.coverage.classificationsOmitted;
 				ctx.ui.notify(
-					`${result.points.length} prompts visualized.\n${EMOTION_TRACE_REPORT_PATH}${opened ? "\n\nOpened in your browser." : ""}`,
+					`${result.points.length} prompts visualized.${omitted > 0 ? `\n${omitted} malformed skill results omitted after retry.` : ""}\n${EMOTION_TRACE_REPORT_PATH}${opened ? "\n\nOpened in your browser." : ""}`,
 					"info",
 				);
 			} catch (error) {

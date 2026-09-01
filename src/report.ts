@@ -201,8 +201,12 @@ export function renderEmotionTraceHtml(result: EmotionTraceResult): string {
 	const first = points[0]?.timestamp;
 	const last = points.at(-1)?.timestamp;
 	const coverageNote = result.coverage.truncated
-		? "Coverage was bounded by the configured prompt limit or classifier input cap."
+		? "Coverage was bounded by configured limits or unavailable skill classifications."
 		: "All prompts found in the selected history window were included.";
+	const omittedNote =
+		result.coverage.classificationsOmitted > 0
+			? ` ${result.coverage.classificationsOmitted} malformed skill classifications were omitted after retry.`
+			: "";
 	return `<!doctype html>
 <html lang="en">
 <head>
@@ -222,7 +226,7 @@ export function renderEmotionTraceHtml(result: EmotionTraceResult): string {
 <section class="summary">${summaryCards(result)}</section>
 <section class="panel"><div class="toolbar"><button class="filter" data-filter="all" aria-pressed="true">All prompts</button><button class="filter" data-filter="steering" aria-pressed="false">Steering</button><button class="filter" data-filter="rejection" aria-pressed="false">Rejections</button><button class="filter" data-filter="doubt" aria-pressed="false">Doubts</button><div class="legend"><span><b>◆</b> steering</span><span><b>×</b> rejection</span><span><b>?</b> doubt</span></div></div><div class="chart-scroll">${chartSvg(points)}</div><div id="hover-card" class="hover-card" aria-live="polite">Hover or focus a point to inspect its score, signals, keywords, and excerpt.</div><p class="note">Color represents valence from negative (red) through neutral (gray) to positive (green). Marker symbols represent interaction signals independently of emotion.</p></section>
 <section class="panel"><h2>Prompt timeline</h2><div class="table-scroll"><table><thead><tr><th>Time</th><th>Valence</th><th>Emotion</th><th>Interaction</th><th>Keywords</th><th>Prompt excerpt</th></tr></thead><tbody>${tableRows(points)}</tbody></table></div></section>
-<section class="panel note"><strong>Coverage:</strong> ${escapeHtml(coverageNote)} ${result.coverage.sessionsRead} of ${result.coverage.sessionsDiscovered} selected sessions were read; ${result.coverage.promptsAnalyzed} of ${result.coverage.promptsFound} discovered prompts were analyzed; ${result.coverage.charactersSubmitted.toLocaleString("en-US")} prompt characters were submitted. Generated ${escapeHtml(formatTimestamp(result.generatedAt))} with ${escapeHtml(result.model)}.<br><strong>Interpretation:</strong> Scores describe wording expressed in prompts. They are not a clinical assessment or an inference about the user's enduring emotional state.</section>
+<section class="panel note"><strong>Coverage:</strong> ${escapeHtml(coverageNote)} ${result.coverage.sessionsRead} of ${result.coverage.sessionsDiscovered} selected sessions were read; ${result.coverage.promptsFound} prompts were discovered; ${result.coverage.promptsAnalyzed} of ${result.coverage.promptsSubmitted} submitted prompts produced well-formed skill classifications.${escapeHtml(omittedNote)} ${result.coverage.charactersSubmitted.toLocaleString("en-US")} prompt characters were submitted. Generated ${escapeHtml(formatTimestamp(result.generatedAt))} with ${escapeHtml(result.model)}.<br><strong>Interpretation:</strong> Semantic labels come only from the classifier skill; the host does not synthesize missing classifications. Scores describe wording expressed in prompts, not a clinical assessment or an inference about enduring emotional state.</section>
 </main>
 <script>
 const hoverCard=document.getElementById('hover-card');

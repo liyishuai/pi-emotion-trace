@@ -79,7 +79,9 @@ export type TraceCoverage = {
 	sessionsDiscovered: number;
 	sessionsRead: number;
 	promptsFound: number;
+	promptsSubmitted: number;
 	promptsAnalyzed: number;
+	classificationsOmitted: number;
 	charactersSubmitted: number;
 	truncated: boolean;
 };

@@ -19,6 +19,7 @@ import {
 } from "./types.ts";
 
 export const DEFAULT_CLASSIFIER_MODEL = "openai-codex/gpt-5.3-codex-spark";
+export const FALLBACK_CLASSIFIER_MODEL = "openai-codex/gpt-5.6-luna";
 export const EMOTION_TRACE_DIRECTORY = join(getAgentDir(), "emotion-trace");
 export const EMOTION_TRACE_CONFIG_PATH = join(EMOTION_TRACE_DIRECTORY, "config.json");
 export const EMOTION_TRACE_REPORT_PATH = join(EMOTION_TRACE_DIRECTORY, "report.html");

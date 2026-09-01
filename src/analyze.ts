@@ -41,9 +41,12 @@ export async function analyzeEmotionHistory(
 			sessionsDiscovered: history.sessionsDiscovered,
 			sessionsRead: history.sessionsRead,
 			promptsFound: history.promptsFound,
+			promptsSubmitted: plan.promptCount,
 			promptsAnalyzed: points.length,
+			classificationsOmitted: plan.promptCount - points.length,
 			charactersSubmitted: plan.promptCharacters,
-			truncated: history.truncated || plan.truncated,
+			truncated:
+				history.truncated || plan.truncated || points.length < plan.promptCount,
 		},
 		points,
 	};

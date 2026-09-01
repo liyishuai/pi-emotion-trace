@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
 	buildClassificationPlan,
+	classifyPromptHistory,
 	parseClassificationBatch,
 } from "../src/classifier.ts";
 import {
@@ -148,7 +149,7 @@ test("reads legacy session JSONL without modifying it", async () => {
 	}
 });
 
-test("validates model classifications and interaction invariants", () => {
+test("accepts only well-formed skill classifications", () => {
 	const timestamp = new Date().toISOString();
 	const prompts: HistoricalPrompt[] = [
 		{
@@ -205,34 +206,62 @@ test("validates model classifications and interaction invariants", () => {
 		points[1]!.excerpt,
 		"No, that is not what I asked. Stop and use a line chart.",
 	);
-	assert.throws(
-		() =>
-			parseClassificationBatch(
-				JSON.stringify({ classifications: validClassifications.slice(0, 1) }),
-				plan.batches[0]!,
-			),
-		/returned 1 classifications for 2 prompts/,
+	const partial = parseClassificationBatch(
+		JSON.stringify({ classifications: validClassifications.slice(0, 1) }),
+		plan.batches[0]!,
 	);
+	assert.deepEqual(partial.map(({ id }) => id), ["one"]);
 	const malformed = structuredClone(validClassifications);
 	malformed[1]!.signals = ["rejection", "correction"];
-	assert.throws(
-		() =>
-			parseClassificationBatch(
-				JSON.stringify({ classifications: malformed }),
-				plan.batches[0]!,
-			),
-		/invalid steering signal invariant/,
+	const withoutInvalidSignals = parseClassificationBatch(
+		JSON.stringify({ classifications: malformed }),
+		plan.batches[0]!,
 	);
+	assert.deepEqual(withoutInvalidSignals.map(({ id }) => id), ["one"]);
 	const invalidValence = structuredClone(validClassifications);
 	invalidValence[0]!.valence = "0" as unknown as number;
-	assert.throws(
-		() =>
-			parseClassificationBatch(
-				JSON.stringify({ classifications: invalidValence }),
-				plan.batches[0]!,
-			),
-		/invalid valence/,
+	const withoutInvalidValence = parseClassificationBatch(
+		JSON.stringify({ classifications: invalidValence }),
+		plan.batches[0]!,
 	);
+	assert.deepEqual(withoutInvalidValence.map(({ id }) => id), ["two"]);
+});
+
+test("retries malformed skill output without scripting a replacement", async () => {
+	const timestamp = new Date().toISOString();
+	const plan = buildClassificationPlan(
+		[
+			{
+				id: "one",
+				sessionId: "session",
+				timestamp,
+				text: "I doubt this conclusion.",
+			},
+		],
+		"classifier instructions",
+	);
+	let attempts = 0;
+	const points = await classifyPromptHistory(plan, async () => {
+		attempts++;
+		return JSON.stringify({
+			classifications: [
+				{
+					prompt_ref: "P0001",
+					valence: attempts === 1 ? "-30" : -30,
+					emotion: "uncertain",
+					confidence: "high",
+					emotion_keywords: ["I doubt"],
+					excerpt: "I doubt this conclusion.",
+					interaction_kind: "request",
+					signals: ["doubt"],
+					signal_keywords: ["I doubt"],
+				},
+			],
+		});
+	});
+	assert.equal(attempts, 2);
+	assert.equal(points.length, 1);
+	assert.equal(points[0]!.valence, -30);
 });
 
 test("the classifier character cap keeps the newest prompts", () => {
@@ -261,7 +290,9 @@ test("renders an escaped, self-contained report with interaction filters", () =>
 			sessionsDiscovered: 1,
 			sessionsRead: 1,
 			promptsFound: 1,
+			promptsSubmitted: 1,
 			promptsAnalyzed: 1,
+			classificationsOmitted: 0,
 			charactersSubmitted: 20,
 			truncated: false,
 		},
