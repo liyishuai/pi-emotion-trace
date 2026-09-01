@@ -1,12 +1,39 @@
 // SPDX-License-Identifier: MPL-2.0
 
-import type { EmotionTraceResult, PromptTracePoint, SignalTag } from "./types.ts";
+import type {
+	EmotionLabel,
+	EmotionTraceResult,
+	InteractionKind,
+	PromptTracePoint,
+	SignalTag,
+} from "./types.ts";
 
 const CHART_HEIGHT = 620;
 const CHART_TOP = 150;
 const CHART_BOTTOM = 70;
 const CHART_LEFT = 72;
 const CHART_RIGHT = 40;
+
+const EMOTION_COLORS = {
+	joyful: "#f5b700",
+	satisfied: "#22a06b",
+	hopeful: "#67c587",
+	calm: "#4f8fe8",
+	neutral: "#94a3b8",
+	uncertain: "#a855f7",
+	concerned: "#d99000",
+	frustrated: "#f06424",
+	angry: "#c9363e",
+	sad: "#5965d8",
+	overwhelmed: "#9f2850",
+} satisfies Record<EmotionLabel, string>;
+
+const INTERACTION_COLORS = {
+	request: "#4f8fe8",
+	steering: "#f06424",
+	response: "#22a06b",
+	other: "#94a3b8",
+} satisfies Record<InteractionKind, string>;
 
 function escapeHtml(value: string): string {
 	return value
@@ -40,6 +67,73 @@ function scoreLabel(score: number): string {
 	return String(score);
 }
 
+interface DistributionDatum {
+	label: string;
+	count: number;
+	color: string;
+}
+
+function distributionPie(title: string, data: DistributionDatum[]): string {
+	const visible = data.filter(({ count }) => count > 0);
+	const total = visible.reduce((sum, { count }) => sum + count, 0);
+	if (total === 0) {
+		return `<section class="panel distribution-card"><h2>${escapeHtml(title)}</h2><div class="empty-distribution">No classified prompts.</div></section>`;
+	}
+	const center = 150;
+	const radius = 110;
+	const rounded = (value: number) => Number(value.toFixed(2));
+	let angle = -Math.PI / 2;
+	const slices = visible
+		.map((datum) => {
+			const portion = datum.count / total;
+			const percentage = (portion * 100).toFixed(1);
+			const sliceTitle = `${datum.label}: ${percentage}% (${datum.count})`;
+			if (portion === 1) {
+				return `<circle cx="${center}" cy="${center}" r="${radius}" fill="${datum.color}" class="pie-slice"><title>${escapeHtml(sliceTitle)}</title></circle>`;
+			}
+			const start = angle;
+			const end = angle + portion * Math.PI * 2;
+			angle = end;
+			const startX = center + radius * Math.cos(start);
+			const startY = center + radius * Math.sin(start);
+			const endX = center + radius * Math.cos(end);
+			const endY = center + radius * Math.sin(end);
+			return `<path d="M ${center} ${center} L ${rounded(startX)} ${rounded(startY)} A ${radius} ${radius} 0 ${portion > 0.5 ? 1 : 0} 1 ${rounded(endX)} ${rounded(endY)} Z" fill="${datum.color}" class="pie-slice"><title>${escapeHtml(sliceTitle)}</title></path>`;
+		})
+		.join("");
+	const legend = visible
+		.map(({ label, count, color }) => {
+			const percentage = ((count / total) * 100).toFixed(1);
+			return `<li><span class="pie-swatch" style="--slice-color:${color}"></span><span>${escapeHtml(label)}</span><strong>${percentage}%</strong><small>${count}</small></li>`;
+		})
+		.join("");
+	return `<section class="panel distribution-card"><h2>${escapeHtml(title)}</h2><div class="pie-layout"><svg class="pie-chart" viewBox="0 0 300 300" role="img" aria-label="${escapeHtml(title)}">${slices}</svg><ul class="pie-legend">${legend}</ul></div></section>`;
+}
+
+function emotionDistribution(points: PromptTracePoint[]): string {
+	return distributionPie(
+		"Emotion distribution",
+		(Object.entries(EMOTION_COLORS) as Array<[EmotionLabel, string]>).map(([emotion, color]) => ({
+			label: emotion.replaceAll("_", " "),
+			count: points.filter((point) => point.emotion === emotion).length,
+			color,
+		})),
+	);
+}
+
+function interactionDistribution(points: PromptTracePoint[]): string {
+	return distributionPie(
+		"Interaction distribution",
+		(Object.entries(INTERACTION_COLORS) as Array<[InteractionKind, string]>).map(
+			([interaction, color]) => ({
+				label: interaction.replaceAll("_", " "),
+				count: points.filter((point) => point.interactionKind === interaction).length,
+				color,
+			}),
+		),
+	);
+}
+
 function markerShape(point: PromptTracePoint, x: number, y: number): string {
 	const color = scoreColor(point.score);
 	const base =
@@ -59,9 +153,8 @@ function signalCount(points: PromptTracePoint[], signal: SignalTag): number {
 	return points.filter((point) => point.signals.includes(signal)).length;
 }
 
-function annotationText(point: PromptTracePoint): string {
-	const signal = point.signals.find((candidate) => candidate !== "steering");
-	return (signal ?? point.emotion).replaceAll("_", " ");
+function annotationText(point: PromptTracePoint): string | undefined {
+	return point.annotationKeyword;
 }
 
 function annotationIndexes(points: PromptTracePoint[], maxAnnotations: number): Set<number> {
@@ -74,8 +167,9 @@ function annotationIndexes(points: PromptTracePoint[], maxAnnotations: number): 
 			if (point.signals.includes("rejection")) weight += 6;
 			if (point.signals.includes("doubt")) weight += 5;
 			if (point.signals.includes("evidence_challenge")) weight += 3;
-			return { index, weight };
+			return { index, weight, keyword: annotationText(point) };
 		})
+		.filter(({ keyword }) => keyword !== undefined)
 		.sort((a, b) => b.weight - a.weight || a.index - b.index);
 	return new Set(ranked.slice(0, maxAnnotations).map(({ index }) => index));
 }
@@ -149,7 +243,8 @@ function chartSvg(points: PromptTracePoint[]): string {
 		.map((index, annotationIndex) => {
 			const point = points[index];
 			const coordinate = coordinates[index];
-			if (!point || !coordinate) return "";
+			const keyword = point ? annotationText(point) : undefined;
+			if (!point || !coordinate || !keyword) return "";
 			const lane = annotationIndex % 4;
 			const labelY = 24 + lane * 27;
 			const anchor =
@@ -158,7 +253,7 @@ function chartSvg(points: PromptTracePoint[]): string {
 					: coordinate.x > width - CHART_RIGHT - 100
 						? "end"
 						: "middle";
-			return `<g class="annotation" data-kind="${point.interactionKind}" data-signals="${point.signals.join(" ")}"><line x1="${coordinate.x}" y1="${labelY + 7}" x2="${coordinate.x}" y2="${coordinate.y - 10}"/><text x="${coordinate.x}" y="${labelY}" text-anchor="${anchor}">${escapeHtml(annotationText(point))}</text></g>`;
+			return `<g class="annotation" data-kind="${point.interactionKind}" data-signals="${point.signals.join(" ")}"><line x1="${coordinate.x}" y1="${labelY + 7}" x2="${coordinate.x}" y2="${coordinate.y - 10}"/><text x="${coordinate.x}" y="${labelY}" text-anchor="${anchor}">${escapeHtml(keyword)}</text></g>`;
 		})
 		.join("");
 	const markers = points
@@ -192,20 +287,6 @@ function summaryCards(result: EmotionTraceResult): string {
 		.join("");
 }
 
-function tableRows(points: PromptTracePoint[]): string {
-	return points
-		.map((point) => {
-			const tags = [
-				`<span class="tag kind">${escapeHtml(point.interactionKind)}</span>`,
-				...point.signals.map(
-					(signal) => `<span class="tag signal">${escapeHtml(signal.replaceAll("_", " "))}</span>`,
-				),
-			].join(" ");
-			return `<tr data-kind="${point.interactionKind}" data-signals="${point.signals.join(" ")}"><td><time>${escapeHtml(formatTimestamp(point.timestamp))}</time></td><td><span class="score" style="--score-color:${scoreColor(point.score)}">${scoreLabel(point.score)}</span></td><td>${escapeHtml(point.emotion)}<small>${escapeHtml(point.confidence)} confidence</small></td><td>${tags}</td></tr>`;
-		})
-		.join("");
-}
-
 export function renderEmotionTraceHtml(result: EmotionTraceResult): string {
 	const points = result.points;
 	const first = points[0]?.timestamp;
@@ -227,15 +308,15 @@ export function renderEmotionTraceHtml(result: EmotionTraceResult): string {
 <style>
 :root{color-scheme:light dark;--bg:#f5f7fb;--panel:#fff;--text:#182230;--muted:#667085;--line:#d9dee8;--accent:#6658d3;--shadow:0 12px 36px rgba(24,34,48,.08)}
 @media(prefers-color-scheme:dark){:root{--bg:#11151c;--panel:#1b222c;--text:#ecf0f5;--muted:#9ba7b5;--line:#364150;--accent:#a89cf5;--shadow:0 12px 36px rgba(0,0,0,.28)}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1600px;margin:auto;padding:32px}header{display:flex;justify-content:space-between;gap:24px;align-items:flex-end;margin-bottom:22px}h1{font-size:34px;line-height:1.1;margin:0 0 8px}h2{font-size:20px;margin:0 0 16px}.subtitle,.muted,small{color:var(--muted)}.summary{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:12px;margin:20px 0}.summary-card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}.summary-card{padding:15px 17px}.summary-card span{display:block;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em}.summary-card strong{display:block;font-size:25px;margin-top:3px}.panel{padding:20px;margin:18px 0}.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}.filter{border:1px solid var(--line);background:transparent;color:var(--text);border-radius:999px;padding:7px 12px;cursor:pointer}.filter[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}.legend{display:flex;gap:16px;flex-wrap:wrap;margin-left:auto;color:var(--muted)}.legend b{color:var(--text)}.chart-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.trace-chart{display:block}.chart-background{fill:var(--panel)}.grid-line{stroke:var(--line);stroke-width:1}.grid-line.neutral{stroke:var(--muted);stroke-width:1.4}.axis-tick{stroke:var(--muted)}.axis-label,.axis-title{fill:var(--muted);font-size:12px}.axis-title{font-weight:600;letter-spacing:.06em}.trace-segment{fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}.empty-chart{min-height:320px;display:grid;place-items:center;color:var(--muted);font-size:16px}.trace-point{cursor:pointer;outline:none}.trace-point:focus{filter:drop-shadow(0 0 4px var(--accent))}.hit-area{fill:transparent}.doubt-mark{fill:#b7791f;font-size:15px;font-weight:800}.annotation line{stroke:var(--line);stroke-dasharray:3 3}.annotation text{fill:var(--text);font-size:11px;font-weight:600}.dimmed{opacity:.12}.hover-card{min-height:58px;margin-top:12px;padding:12px 14px;border-radius:10px;background:color-mix(in srgb,var(--accent) 8%,var(--panel));border:1px solid color-mix(in srgb,var(--accent) 25%,var(--line))}.hover-card strong{margin-right:8px}.table-scroll{overflow:auto;max-height:720px}table{border-collapse:collapse;width:100%;min-width:720px}th{position:sticky;top:0;background:var(--panel);z-index:1;text-align:left;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em}th,td{padding:11px 10px;border-bottom:1px solid var(--line);vertical-align:top}td small{display:block}.score{color:var(--score-color);font-size:16px;font-weight:750}.tag{display:inline-block;border-radius:999px;padding:2px 7px;margin:0 2px 3px 0;font-size:11px}.tag.kind{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}.tag.signal{background:color-mix(in srgb,#e9a23b 18%,transparent);color:#a15c00}.note{font-size:12px;color:var(--muted);margin-top:14px}@media(max-width:900px){main{padding:18px}header{display:block}.summary{grid-template-columns:repeat(2,1fr)}.legend{width:100%;margin:6px 0 0}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1600px;margin:auto;padding:32px}header{display:flex;justify-content:space-between;gap:24px;align-items:flex-end;margin-bottom:22px}h1{font-size:34px;line-height:1.1;margin:0 0 8px}h2{font-size:20px;margin:0 0 16px}.subtitle,.muted{color:var(--muted)}.summary{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:12px;margin:20px 0}.summary-card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}.summary-card{padding:15px 17px}.summary-card span{display:block;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em}.summary-card strong{display:block;font-size:25px;margin-top:3px}.panel{padding:20px;margin:18px 0}.distribution-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:18px 0}.distribution-card{margin:0}.pie-layout{display:grid;grid-template-columns:minmax(180px,260px) minmax(190px,1fr);gap:18px;align-items:center}.pie-chart{display:block;width:100%;max-width:260px;margin:auto}.pie-slice{stroke:var(--panel);stroke-width:2}.pie-legend{list-style:none;padding:0;margin:0;display:grid;gap:8px}.pie-legend li{display:grid;grid-template-columns:12px minmax(80px,1fr) auto auto;gap:8px;align-items:center}.pie-legend strong{font-variant-numeric:tabular-nums}.pie-legend small{color:var(--muted);min-width:24px;text-align:right}.pie-swatch{width:10px;height:10px;border-radius:50%;background:var(--slice-color)}.empty-distribution{min-height:240px;display:grid;place-items:center;color:var(--muted)}.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}.filter{border:1px solid var(--line);background:transparent;color:var(--text);border-radius:999px;padding:7px 12px;cursor:pointer}.filter[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}.legend{display:flex;gap:16px;flex-wrap:wrap;margin-left:auto;color:var(--muted)}.legend b{color:var(--text)}.chart-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.trace-chart{display:block}.chart-background{fill:var(--panel)}.grid-line{stroke:var(--line);stroke-width:1}.grid-line.neutral{stroke:var(--muted);stroke-width:1.4}.axis-tick{stroke:var(--muted)}.axis-label,.axis-title{fill:var(--muted);font-size:12px}.axis-title{font-weight:600;letter-spacing:.06em}.trace-segment{fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}.empty-chart{min-height:320px;display:grid;place-items:center;color:var(--muted);font-size:16px}.trace-point{cursor:pointer;outline:none}.trace-point:focus{filter:drop-shadow(0 0 4px var(--accent))}.hit-area{fill:transparent}.doubt-mark{fill:#b7791f;font-size:15px;font-weight:800}.annotation line{stroke:var(--line);stroke-dasharray:3 3}.annotation text{fill:var(--text);font-size:11px;font-weight:600}.dimmed{opacity:.12}.hover-card{min-height:58px;margin-top:12px;padding:12px 14px;border-radius:10px;background:color-mix(in srgb,var(--accent) 8%,var(--panel));border:1px solid color-mix(in srgb,var(--accent) 25%,var(--line))}.hover-card strong{margin-right:8px}.note{font-size:12px;color:var(--muted);margin-top:14px}@media(max-width:900px){main{padding:18px}header{display:block}.summary{grid-template-columns:repeat(2,1fr)}.distribution-grid{grid-template-columns:1fr}.legend{width:100%;margin:6px 0 0}}
 </style>
 </head>
 <body>
 <main>
 <header><div><h1>Pi Emotion Trace</h1><div class="subtitle">0–100 emotional score and interaction signals across chronological prompts</div></div><div class="muted">${first ? `${escapeHtml(formatTimestamp(first))} — ${escapeHtml(formatTimestamp(last!))}` : "No prompts"}</div></header>
 <section class="summary">${summaryCards(result)}</section>
+<section class="distribution-grid">${emotionDistribution(points)}${interactionDistribution(points)}</section>
 <section class="panel"><div class="toolbar"><button class="filter" data-filter="all" aria-pressed="true">All prompts</button><button class="filter" data-filter="steering" aria-pressed="false">Steering</button><button class="filter" data-filter="rejection" aria-pressed="false">Rejections</button><button class="filter" data-filter="doubt" aria-pressed="false">Doubts</button><div class="legend"><span><b>◆</b> steering</span><span><b>×</b> rejection</span><span><b>?</b> doubt</span></div></div><div class="chart-scroll">${chartSvg(points)}</div><div id="hover-card" class="hover-card" aria-live="polite">Hover or focus a point to inspect its classification.</div><p class="note">Scores run from 0 (most negative) through 50 (neutral) to 100 (most positive).</p></section>
-<section class="panel"><h2>Prompt timeline</h2><div class="table-scroll"><table><thead><tr><th>Time</th><th>Score</th><th>Emotion</th><th>Interaction</th></tr></thead><tbody>${tableRows(points)}</tbody></table></div></section>
 <section class="panel note"><strong>Coverage:</strong> ${escapeHtml(coverageNote)} ${result.coverage.sessionsRead} of ${result.coverage.sessionsDiscovered} selected sessions were read; ${result.coverage.promptsFound} prompts were discovered; ${result.coverage.promptsAnalyzed} of ${result.coverage.promptsSubmitted} submitted prompts produced well-formed skill classifications.${escapeHtml(omittedNote)} ${result.coverage.charactersSubmitted.toLocaleString("en-US")} prompt characters were submitted. Generated ${escapeHtml(formatTimestamp(result.generatedAt))} with ${escapeHtml(result.model)}.<br><strong>Interpretation:</strong> Scores and semantic labels come only from the classifier model applying the packaged skill; the host does not derive or synthesize them. Scores describe wording expressed in prompts, not a clinical assessment or an inference about enduring emotional state.</section>
 </main>
 <script>
@@ -247,7 +328,6 @@ for(const point of document.querySelectorAll('.trace-point')){
 for(const button of document.querySelectorAll('.filter')){
  button.addEventListener('click',()=>{const filter=button.dataset.filter;for(const other of document.querySelectorAll('.filter'))other.setAttribute('aria-pressed',String(other===button));
   for(const item of document.querySelectorAll('.trace-point,.annotation')){const matches=filter==='all'||item.dataset.kind===filter||(item.dataset.signals||'').split(' ').includes(filter);item.classList.toggle('dimmed',!matches)}
-  for(const row of document.querySelectorAll('tbody tr')){const matches=filter==='all'||row.dataset.kind===filter||(row.dataset.signals||'').split(' ').includes(filter);row.hidden=!matches}
  });
 }
 </script>

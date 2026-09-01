@@ -73,6 +73,7 @@ export type PromptTracePoint = {
 	interactionKind: InteractionKind;
 	signals: SignalTag[];
 	signalKeywords: string[];
+	annotationKeyword?: string;
 };
 
 export type TraceCoverage = {

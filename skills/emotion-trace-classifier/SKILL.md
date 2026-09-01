@@ -86,7 +86,7 @@ Signals are not emotions and do not mechanically determine a score. However, a m
 
 - `emotion_keywords`: one to three short, exact, contiguous spans from the prompt that best support the emotional assessment. Return an empty array when no wording expresses emotion.
 - `signal_keywords`: one to three short, exact, contiguous spans from the prompt that best support the interaction signals. Return an empty array when no signal is present.
-- Each keyword must be at most 40 characters.
+- Each keyword must be at most 40 characters. Never use the entire prompt as a keyword; if a very short prompt has no smaller supporting span, return an empty keyword array.
 - `excerpt`: one exact, contiguous excerpt of at most 160 characters that best illustrates the emotion or interaction signal. For a neutral prompt without a signal, choose a representative excerpt.
 - Never return the full prompt unless it is already 160 characters or shorter.
 

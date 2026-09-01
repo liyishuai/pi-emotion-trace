@@ -97,14 +97,14 @@ The responsive local HTML report contains:
 
 - a smooth chronological score curve colored from negative through neutral to positive;
 - equal horizontal spacing for every plotted prompt, regardless of elapsed time;
-- neutral points included in both the curve and timeline table;
+- neutral points included in the curve;
+- pie charts for emotion-label and interaction-kind proportions;
 - diamonds for steering prompts;
 - crosses for rejections;
 - question marks for doubts;
-- classification-label callouts for salient points;
-- hover and keyboard-focus classification details for every point;
-- filters for all prompts, steering, rejection, and doubt; and
-- a timeline table containing timestamps, scores, emotion labels, confidence, and interaction tags.
+- exact source-keyword callouts for salient points;
+- hover and keyboard-focus classification details for every point; and
+- filters for all prompts, steering, rejection, and doubt.
 
 The chart uses inline SVG, CSS, and JavaScript and loads no external assets.
 
@@ -118,15 +118,15 @@ Pi discovers the portable skill as `/skill:emotion-trace-classifier`. Another Ag
 
 - Persisted user-role prompt text is read locally and submitted transiently to the selected classifier model.
 - Pi session records do not distinguish typed prompts from extension-injected user messages, so those messages can appear in the analyzed history.
-- The exported HTML contains no prompt text, excerpts, or exact keyword spans.
-- The report contains prompt timestamps, scores, confidence, labels, interaction signals, coverage metadata, and the classifier model label.
-- The host accepts only well-formed bounded labels, signals, keywords, and exact excerpts. Exact spans remain transient and are discarded from report rendering; the host never supplies semantic fallback values.
+- The exported HTML contains no full prompts or prompt excerpts. Selected exact source keywords shorter than the complete prompt appear only as chart annotations.
+- The report contains prompt timestamps, scores, labels, interaction signals, distribution counts, coverage metadata, and the classifier model label.
+- The host accepts only well-formed bounded labels, signals, keywords, and exact excerpts. Apart from selected annotation keywords, exact spans are discarded from report rendering; the host never supplies semantic fallback values.
 - The latest report replaces the previous report and is written with user-only file permissions.
 - A run inspects at most 1,000 recently modified session files.
 - Model batches contain at most 80 prompts and 45,000 prompt characters.
 - A run submits at most 180,000 prompt characters, keeps the newest prompts that fit, and marks bounded coverage in the report.
 - Historical JSONL files are read directly without opening or migrating them through `SessionManager`; a read failure aborts the run instead of silently dropping a session.
-- Prompt text, session paths, repository paths, assistant messages, tools, errors, token counts, and model prose are excluded from the report.
+- Full prompt text, prompt excerpts, session paths, repository paths, assistant messages, tools, errors, token counts, and model prose are excluded from the report.
 
 ## Development
 

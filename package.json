@@ -1,6 +1,6 @@
 {
   "name": "pi-emotion-trace",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "exports": {
     "./skills/emotion-trace-classifier": "./skills/emotion-trace-classifier/SKILL.md"

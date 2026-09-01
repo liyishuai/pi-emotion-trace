@@ -202,6 +202,14 @@ test("accepts only well-formed skill classifications", () => {
 	assert.deepEqual(points[0]!.emotionKeywords, []);
 	assert.deepEqual(points[1]!.signals, ["steering", "rejection", "correction"]);
 	assert.deepEqual(points[1]!.signalKeywords, ["Stop"]);
+	assert.equal(points[1]!.annotationKeyword, "Stop");
+	const fullPromptKeyword = structuredClone(validClassifications);
+	fullPromptKeyword[0]!.emotion_keywords = ["Continue."];
+	const guardedAnnotations = parseClassificationBatch(
+		JSON.stringify({ classifications: fullPromptKeyword }),
+		plan.batches[0]!,
+	);
+	assert.equal(guardedAnnotations[0]!.annotationKeyword, undefined);
 	assert.equal(
 		points[1]!.excerpt,
 		"No, that is not what I asked. Stop and use a line chart.",
@@ -280,7 +288,7 @@ test("the classifier character cap keeps the newest prompts", () => {
 	assert.ok(plan.promptCharacters <= 180_000);
 });
 
-test("omits exact prompt text from the self-contained report", () => {
+test("omits full prompt text and the timeline table from the report", () => {
 	const timestamp = new Date().toISOString();
 	const result: EmotionTraceResult = {
 		generatedAt: timestamp,
@@ -308,6 +316,7 @@ test("omits exact prompt text from the self-contained report", () => {
 				interactionKind: "steering",
 				signals: ["steering", "doubt"],
 				signalKeywords: ["PRIVATE_SIGNAL_SOURCE_SPAN"],
+				annotationKeyword: "PRIVATE_SIGNAL_SOURCE_SPAN",
 			},
 		],
 	};
@@ -319,8 +328,11 @@ test("omits exact prompt text from the self-contained report", () => {
 	assert.match(html, /example\/model&lt;\/script&gt;&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 	assert.doesNotMatch(html, /PRIVATE_FULL_PROMPT_TEXT/);
 	assert.doesNotMatch(html, /PRIVATE_EMOTION_SOURCE_SPAN/);
-	assert.doesNotMatch(html, /PRIVATE_SIGNAL_SOURCE_SPAN/);
-	assert.doesNotMatch(html, /data-excerpt|data-keywords|Prompt excerpt|<th>Keywords<\/th>/);
+	assert.match(html, /PRIVATE_SIGNAL_SOURCE_SPAN/);
+	assert.equal(html.match(/class="pie-chart"/g)?.length, 2);
+	assert.match(html, /Emotion distribution/);
+	assert.match(html, /Interaction distribution/);
+	assert.doesNotMatch(html, /<table|Prompt timeline|data-excerpt|data-keywords|Prompt excerpt/);
 	assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
 	assert.doesNotMatch(html, /<script src=/);
 });

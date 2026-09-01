@@ -263,6 +263,10 @@ function classificationFor(
 	) {
 		return undefined;
 	}
+	const fullPrompt = item.prompt.text.trim();
+	const annotationKeyword = [...signalKeywords, ...emotionKeywords].find(
+		(keyword) => keyword.trim() !== fullPrompt,
+	);
 	return {
 		id: item.prompt.id,
 		timestamp: item.prompt.timestamp,
@@ -274,6 +278,7 @@ function classificationFor(
 		interactionKind,
 		signals,
 		signalKeywords,
+		annotationKeyword,
 	};
 }
 
