@@ -73,7 +73,7 @@ Each selected user-role prompt receives two independent classifications.
 - one to three exact emotional keywords; and
 - an emotionally relevant prompt excerpt capped at 160 characters.
 
-Neutral technical requests remain near zero unless their wording expresses emotion. The classifier describes wording in the prompt; it does not infer mental-health conditions, personality, private motives, or enduring emotional state.
+Exact spans are used transiently to ground and validate classifier output; they are not written to the exported HTML. Score 50 is reserved for genuinely affect-free, trivial, or purely procedural prompts; brevity, ambiguity, or restrained wording alone does not make a prompt neutral. The classifier describes wording in the prompt; it does not infer mental-health conditions, personality, private motives, or enduring emotional state.
 
 ### Interaction with the agent
 
@@ -89,7 +89,7 @@ Each prompt is classified as a request, steering, response, or other content. It
 - stop request; or
 - replacement request.
 
-Interaction signals are not treated as emotions. A rejection, doubt, or correction can have a neutral emotional score of 50.
+Interaction signals do not mechanically determine emotion, but meaningful rejection, doubt, correction, approval, stopping, or replacement is not treated as trivial and should not default to 50.
 
 ## Visualization
 
@@ -97,14 +97,14 @@ The responsive local HTML report contains:
 
 - a smooth chronological score curve colored from negative through neutral to positive;
 - equal horizontal spacing for every plotted prompt, regardless of elapsed time;
-- neutral prompts excluded from the curve but retained in the timeline table;
+- neutral points included in both the curve and timeline table;
 - diamonds for steering prompts;
 - crosses for rejections;
 - question marks for doubts;
-- keyword callouts for emotionally or behaviorally salient points;
-- hover and keyboard-focus details for every point;
+- classification-label callouts for salient points;
+- hover and keyboard-focus classification details for every point;
 - filters for all prompts, steering, rejection, and doubt; and
-- a complete timeline table with score, emotion, interaction tags, keywords, and bounded excerpts.
+- a timeline table containing timestamps, scores, emotion labels, confidence, and interaction tags.
 
 The chart uses inline SVG, CSS, and JavaScript and loads no external assets.
 
@@ -118,15 +118,15 @@ Pi discovers the portable skill as `/skill:emotion-trace-classifier`. Another Ag
 
 - Persisted user-role prompt text is read locally and submitted transiently to the selected classifier model.
 - Pi session records do not distinguish typed prompts from extension-injected user messages, so those messages can appear in the analyzed history.
-- Full prompts are not stored as separate report fields. The report intentionally contains exact keywords and excerpts capped at 160 characters; a short prompt can therefore appear in full as its excerpt.
-- The report also contains prompt timestamps, scores, labels, and interaction signals.
-- The host accepts only well-formed bounded labels, signals, keywords, and exact excerpts. It never supplies semantic fallback values.
+- The exported HTML contains no prompt text, excerpts, or exact keyword spans.
+- The report contains prompt timestamps, scores, confidence, labels, interaction signals, coverage metadata, and the classifier model label.
+- The host accepts only well-formed bounded labels, signals, keywords, and exact excerpts. Exact spans remain transient and are discarded from report rendering; the host never supplies semantic fallback values.
 - The latest report replaces the previous report and is written with user-only file permissions.
 - A run inspects at most 1,000 recently modified session files.
 - Model batches contain at most 80 prompts and 45,000 prompt characters.
 - A run submits at most 180,000 prompt characters, keeps the newest prompts that fit, and marks bounded coverage in the report.
 - Historical JSONL files are read directly without opening or migrating them through `SessionManager`; a read failure aborts the run instead of silently dropping a session.
-- Session paths, repository paths, assistant messages, tools, errors, token counts, and model prose are excluded from behavioral evidence and from the report.
+- Prompt text, session paths, repository paths, assistant messages, tools, errors, token counts, and model prose are excluded from the report.
 
 ## Development
 

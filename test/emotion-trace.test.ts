@@ -156,7 +156,7 @@ test("accepts only well-formed skill classifications", () => {
 			id: "one",
 			sessionId: "private-session-id",
 			timestamp,
-			text: "Please draw a chart.",
+			text: "Continue.",
 		},
 		{
 			id: "two",
@@ -168,7 +168,7 @@ test("accepts only well-formed skill classifications", () => {
 	const plan = buildClassificationPlan(prompts, "classifier instructions");
 	assert.equal(plan.promptCount, 2);
 	assert.match(plan.batches[0]!.prompt, /"session_ref":"S0001"/);
-	assert.match(plan.batches[0]!.prompt, /"previous_user_text":"Please draw a chart\."/);
+	assert.match(plan.batches[0]!.prompt, /"previous_user_text":"Continue\."/);
 	assert.doesNotMatch(plan.batches[0]!.prompt, /private-session-id/);
 	const validClassifications = [
 		{
@@ -177,7 +177,7 @@ test("accepts only well-formed skill classifications", () => {
 			emotion: "neutral",
 			confidence: "high",
 			emotion_keywords: [],
-			excerpt: "Please draw a chart.",
+			excerpt: "Continue.",
 			interaction_kind: "request",
 			signals: [],
 			signal_keywords: [],
@@ -280,12 +280,12 @@ test("the classifier character cap keeps the newest prompts", () => {
 	assert.ok(plan.promptCharacters <= 180_000);
 });
 
-test("renders an escaped, self-contained report with interaction filters", () => {
+test("omits exact prompt text from the self-contained report", () => {
 	const timestamp = new Date().toISOString();
 	const result: EmotionTraceResult = {
 		generatedAt: timestamp,
 		historyWindow: "90d",
-		model: "example/model",
+		model: "example/model</script><script>alert(1)</script>",
 		coverage: {
 			sessionsDiscovered: 1,
 			sessionsRead: 1,
@@ -303,11 +303,11 @@ test("renders an escaped, self-contained report with interaction filters", () =>
 				score: 35,
 				emotion: "uncertain",
 				confidence: "high",
-				emotionKeywords: ["doubt"],
-				excerpt: "I doubt </script><script>alert(1)</script>",
+				emotionKeywords: ["PRIVATE_EMOTION_SOURCE_SPAN"],
+				excerpt: "PRIVATE_FULL_PROMPT_TEXT</script><script>promptLeak()</script>",
 				interactionKind: "steering",
 				signals: ["steering", "doubt"],
-				signalKeywords: ["doubt"],
+				signalKeywords: ["PRIVATE_SIGNAL_SOURCE_SPAN"],
 			},
 		],
 	};
@@ -316,7 +316,11 @@ test("renders an escaped, self-contained report with interaction filters", () =>
 	assert.match(html, /data-filter="steering"/);
 	assert.match(html, /data-filter="rejection"/);
 	assert.match(html, /data-filter="doubt"/);
-	assert.match(html, /&lt;\/script&gt;&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+	assert.match(html, /example\/model&lt;\/script&gt;&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+	assert.doesNotMatch(html, /PRIVATE_FULL_PROMPT_TEXT/);
+	assert.doesNotMatch(html, /PRIVATE_EMOTION_SOURCE_SPAN/);
+	assert.doesNotMatch(html, /PRIVATE_SIGNAL_SOURCE_SPAN/);
+	assert.doesNotMatch(html, /data-excerpt|data-keywords|Prompt excerpt|<th>Keywords<\/th>/);
 	assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
 	assert.doesNotMatch(html, /<script src=/);
 });
